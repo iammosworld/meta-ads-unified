@@ -71,40 +71,78 @@ async function getCampaigns(accountId) {
   });
 }
 
-function createServer() {
-  const server = new Server({ name: "meta-ads-unified", version: "1.0.0" }, { capabilities: { tools: {} } });
+function createMCPServer() {
+  const server = new Server(
+    { name: "meta-ads-unified", version: "1.0.0" },
+    { capabilities: { tools: {} } }
+  );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
         name: "get_all_accounts_overview",
         description: "Get performance across ALL ad accounts in one call.",
-        inputSchema: { type: "object", properties: { date_preset: { type: "string", enum: ["today","yesterday","last_7d","last_14d","last_30d","last_90d","this_month","last_month"] } }, required: ["date_preset"] },
+        inputSchema: {
+          type: "object",
+          properties: {
+            date_preset: { type: "string", enum: ["today","yesterday","last_7d","last_14d","last_30d","last_90d","this_month","last_month"] }
+          },
+          required: ["date_preset"]
+        },
       },
       {
         name: "get_campaign_performance",
         description: "Get campaign-level performance for a specific account.",
-        inputSchema: { type: "object", properties: { account: { type: "string", enum: ["modest_forever","mdst","mosworld","mosworld_fit","seller_dummy"] }, date_preset: { type: "string", enum: ["today","yesterday","last_7d","last_14d","last_30d","last_90d","this_month","last_month"] }, campaign_id: { type: "string" } }, required: ["account","date_preset"] },
+        inputSchema: {
+          type: "object",
+          properties: {
+            account: { type: "string", enum: ["modest_forever","mdst","mosworld","mosworld_fit","seller_dummy"] },
+            date_preset: { type: "string", enum: ["today","yesterday","last_7d","last_14d","last_30d","last_90d","this_month","last_month"] },
+            campaign_id: { type: "string" }
+          },
+          required: ["account","date_preset"]
+        },
       },
       {
         name: "get_ad_performance",
         description: "Get top 20 ads by spend for a specific account.",
-        inputSchema: { type: "object", properties: { account: { type: "string", enum: ["modest_forever","mdst","mosworld","mosworld_fit","seller_dummy"] }, date_preset: { type: "string", enum: ["today","yesterday","last_7d","last_14d","last_30d","last_90d","this_month","last_month"] } }, required: ["account","date_preset"] },
+        inputSchema: {
+          type: "object",
+          properties: {
+            account: { type: "string", enum: ["modest_forever","mdst","mosworld","mosworld_fit","seller_dummy"] },
+            date_preset: { type: "string", enum: ["today","yesterday","last_7d","last_14d","last_30d","last_90d","this_month","last_month"] }
+          },
+          required: ["account","date_preset"]
+        },
       },
       {
         name: "get_campaigns",
         description: "List all campaigns with status and budget.",
-        inputSchema: { type: "object", properties: { account: { type: "string", enum: ["modest_forever","mdst","mosworld","mosworld_fit","seller_dummy"] } }, required: ["account"] },
+        inputSchema: {
+          type: "object",
+          properties: {
+            account: { type: "string", enum: ["modest_forever","mdst","mosworld","mosworld_fit","seller_dummy"] }
+          },
+          required: ["account"]
+        },
       },
       {
         name: "pause_campaign",
         description: "Pause a campaign by ID.",
-        inputSchema: { type: "object", properties: { campaign_id: { type: "string" } }, required: ["campaign_id"] },
+        inputSchema: {
+          type: "object",
+          properties: { campaign_id: { type: "string" } },
+          required: ["campaign_id"]
+        },
       },
       {
         name: "pause_ad",
         description: "Pause an ad by ID.",
-        inputSchema: { type: "object", properties: { ad_id: { type: "string" } }, required: ["ad_id"] },
+        inputSchema: {
+          type: "object",
+          properties: { ad_id: { type: "string" } },
+          required: ["ad_id"]
+        },
       },
     ],
   }));
@@ -149,24 +187,35 @@ function createServer() {
 }
 
 const app = express();
-const transports = {};
+const transports = new Map();
 
 app.get("/sse", async (req, res) => {
-  const transport = new SSEServerTransport("/messages", res);
-  transports[transport.sessionId] = transport;
-  const server = createServer();
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
+  const transport = new SSEServerTransport("/message", res);
+  transports.set(transport.sessionId, transport);
+
+  const server = createMCPServer();
   await server.connect(transport);
-  res.on("close", () => delete transports[transport.sessionId]);
+
+  req.on("close", () => {
+    transports.delete(transport.sessionId);
+  });
 });
 
-app.post("/messages", express.json(), async (req, res) => {
+app.post("/message", express.json(), async (req, res) => {
   const sessionId = req.query.sessionId;
-  const transport = transports[sessionId];
+  const transport = transports.get(sessionId);
   if (!transport) return res.status(404).json({ error: "Session not found" });
   await transport.handlePostMessage(req, res);
 });
 
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Meta Ads Unified MCP running on port ${PORT}`));
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Meta Ads Unified MCP running on port ${PORT}`);
+});
